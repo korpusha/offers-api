@@ -6,6 +6,8 @@ use App\Actions\RegisterImport;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreImportRequest;
 use App\Http\Resources\ImportAcceptedResource;
+use App\Http\Resources\ImportResource;
+use App\Models\Import;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
 
@@ -21,5 +23,13 @@ class ImportController extends Controller
         return ImportAcceptedResource::make($import)
             ->response()
             ->setStatusCode(Response::HTTP_ACCEPTED);
+    }
+
+    /**
+     * Report where an import currently stands.
+     */
+    public function show(Import $import): ImportResource
+    {
+        return ImportResource::make($import->load('supplier'));
     }
 }
