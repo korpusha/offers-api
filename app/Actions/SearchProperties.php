@@ -45,7 +45,8 @@ class SearchProperties
             ])
             ->orderBy('best.price')
             ->orderBy('properties.id')
-            ->paginate($perPage);
+            ->paginate($perPage)
+            ->withQueryString();
     }
 
     /**
