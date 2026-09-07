@@ -113,11 +113,15 @@ class ProcessImport implements ShouldBeUnique, ShouldQueue
     private function applyOffer(Import $import, array $offer): bool
     {
         try {
-            DB::transaction(function () use ($import, $offer): void {
+            $propertyId = DB::transaction(function () use ($import, $offer): int {
                 $propertyId = $this->resolvePropertyId($offer['property']);
 
                 $this->upsertOffer($import, $offer, $propertyId);
+
+                return $propertyId;
             });
+
+            $this->propertyIds[$offer['property']['code']] = $propertyId;
 
             return true;
         } catch (Throwable $e) {
@@ -147,7 +151,7 @@ class ProcessImport implements ShouldBeUnique, ShouldQueue
             $model = Property::where('code', $property['code'])->firstOrFail();
         }
 
-        return $this->propertyIds[$property['code']] = $model->id;
+        return $model->id;
     }
 
     /**

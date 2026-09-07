@@ -49,8 +49,7 @@ class RegisterImport
                 return $import;
             });
         } catch (UniqueConstraintViolationException) {
-            return $this->findExisting($supplier, $payload['external_import_id'])
-                ?? throw new RuntimeException('Import row vanished after a unique constraint violation.');
+            return $this->findExisting($supplier, $payload['external_import_id']);
         }
     }
 
