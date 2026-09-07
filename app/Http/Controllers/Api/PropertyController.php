@@ -12,9 +12,6 @@ class PropertyController extends Controller
 {
     private const PER_PAGE = 15;
 
-    /**
-     * Search for properties with a bookable offer for the requested stay.
-     */
     public function index(
         SearchPropertiesRequest $request,
         SearchProperties $searchProperties,

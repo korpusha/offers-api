@@ -8,8 +8,6 @@ use Illuminate\Database\Seeder;
 class SupplierSeeder extends Seeder
 {
     /**
-     * The suppliers the API accepts imports from.
-     *
      * @var array<int, array{code: string, name: string}>
      */
     private const SUPPLIERS = [
@@ -17,9 +15,6 @@ class SupplierSeeder extends Seeder
         ['code' => 'supplier-b', 'name' => 'Supplier B'],
     ];
 
-    /**
-     * Seed the suppliers table.
-     */
     public function run(): void
     {
         foreach (self::SUPPLIERS as $supplier) {

@@ -11,8 +11,6 @@ use Illuminate\Support\Facades\DB;
 class CreateReservation
 {
     /**
-     * Reserve one unit of an offer.
-     *
      * @param  array{client_reference: string, customer_name: string, customer_email: string}  $data
      * @return array{0: Reservation, 1: bool} the reservation and whether it was created now
      *
@@ -36,8 +34,6 @@ class CreateReservation
     }
 
     /**
-     * Take a unit and record the booking, or leave the inventory untouched.
-     *
      * @param  array{client_reference: string, customer_name: string, customer_email: string}  $data
      *
      * @throws OfferNotBookableException

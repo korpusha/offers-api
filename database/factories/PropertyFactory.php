@@ -11,8 +11,6 @@ use Illuminate\Database\Eloquent\Factories\Factory;
 class PropertyFactory extends Factory
 {
     /**
-     * Define the model's default state.
-     *
      * @return array<string, mixed>
      */
     public function definition(): array
@@ -26,9 +24,6 @@ class PropertyFactory extends Factory
         ];
     }
 
-    /**
-     * Place the property in a specific city.
-     */
     public function inCity(string $city): static
     {
         return $this->state(fn (array $attributes): array => [

@@ -11,9 +11,6 @@ enum ImportOfferError: string
 
     case ConstraintViolation = 'constraint_violation';
 
-    /**
-     * Say what an offer did wrong, or null when the failure was not about it.
-     */
     public static function for(Throwable $e): ?self
     {
         if (! $e instanceof QueryException) {

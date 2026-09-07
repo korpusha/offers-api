@@ -12,9 +12,6 @@ use Illuminate\Http\Response;
 
 class ReservationController extends Controller
 {
-    /**
-     * Reserve a unit of an offer.
-     */
     public function store(
         StoreReservationRequest $request,
         Offer $offer,

@@ -16,14 +16,9 @@ use RuntimeException;
 
 class RegisterImport
 {
-    /**
-     * How many staged offers to write per INSERT statement.
-     */
     private const STAGE_CHUNK = 1000;
 
     /**
-     * Record an incoming import and queue it for processing.
-     *
      * @param  array{supplier: string, external_import_id: string, sent_at: string, offers: array<int, array<string, mixed>>}  $payload
      *
      * @throws StaleImportException
@@ -64,8 +59,6 @@ class RegisterImport
     }
 
     /**
-     * Park the offers as they arrived, for the job to pick up.
-     *
      * @param  array<int, array<string, mixed>>  $offers
      */
     private function stage(Import $import, array $offers): void

@@ -13,8 +13,6 @@ use Illuminate\Database\Eloquent\Factories\Factory;
 class ImportOfferFactory extends Factory
 {
     /**
-     * Define the model's default state.
-     *
      * @return array<string, mixed>
      */
     public function definition(): array
@@ -45,9 +43,6 @@ class ImportOfferFactory extends Factory
         ];
     }
 
-    /**
-     * Indicate that the offer was applied to the catalogue.
-     */
     public function applied(): static
     {
         return $this->state(fn (array $attributes): array => [
@@ -55,9 +50,6 @@ class ImportOfferFactory extends Factory
         ]);
     }
 
-    /**
-     * Indicate that the offer was skipped.
-     */
     public function skipped(string $code = 'unexpected_error', string $message = 'Something went wrong.'): static
     {
         return $this->state(fn (array $attributes): array => [

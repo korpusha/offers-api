@@ -13,9 +13,6 @@ use Illuminate\Http\Response;
 
 class ImportController extends Controller
 {
-    /**
-     * Accept an import from a supplier and queue it for processing.
-     */
     public function store(StoreImportRequest $request, RegisterImport $registerImport): JsonResponse
     {
         $import = $registerImport($request->validated());
@@ -25,9 +22,6 @@ class ImportController extends Controller
             ->setStatusCode(Response::HTTP_ACCEPTED);
     }
 
-    /**
-     * Report where an import currently stands.
-     */
     public function show(Import $import): ImportResource
     {
         return ImportResource::make($import->load('supplier'));

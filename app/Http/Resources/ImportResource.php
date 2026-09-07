@@ -14,14 +14,9 @@ use Illuminate\Support\Carbon;
  */
 class ImportResource extends JsonResource
 {
-    /**
-     * How many skipped offers to name.
-     */
     private const SKIPPED_LIMIT = 50;
 
     /**
-     * Transform the resource into an array.
-     *
      * @return array<string, mixed>
      */
     public function toArray(Request $request): array
@@ -42,8 +37,6 @@ class ImportResource extends JsonResource
     }
 
     /**
-     * Name the offers this import could not apply, and why.
-     *
      * @return array<int, array{external_id: string, code: string|null}>
      */
     private function skipped(): array
@@ -60,9 +53,6 @@ class ImportResource extends JsonResource
             ->all();
     }
 
-    /**
-     * Render a timestamp in UTC with whole seconds.
-     */
     private function zulu(?Carbon $timestamp): ?string
     {
         return $timestamp?->utc()->toIso8601ZuluString();

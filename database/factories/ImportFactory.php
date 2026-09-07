@@ -13,8 +13,6 @@ use Illuminate\Database\Eloquent\Factories\Factory;
 class ImportFactory extends Factory
 {
     /**
-     * Define the model's default state.
-     *
      * @return array<string, mixed>
      */
     public function definition(): array
@@ -31,9 +29,6 @@ class ImportFactory extends Factory
         ];
     }
 
-    /**
-     * Indicate that the import is being processed.
-     */
     public function processing(): static
     {
         return $this->state(fn (array $attributes): array => [
@@ -41,9 +36,6 @@ class ImportFactory extends Factory
         ]);
     }
 
-    /**
-     * Indicate that the import finished, optionally skipping some offers.
-     */
     public function completed(int $totalOffers = 0, ?int $processedOffers = null): static
     {
         return $this->state(fn (array $attributes): array => [
@@ -54,9 +46,6 @@ class ImportFactory extends Factory
         ]);
     }
 
-    /**
-     * Indicate that the import failed as a whole.
-     */
     public function failed(string $error = 'Import failed.'): static
     {
         return $this->state(fn (array $attributes): array => [

@@ -17,8 +17,6 @@ class Import extends Model
     use HasFactory, MassPrunable;
 
     /**
-     * The attributes that are mass assignable.
-     *
      * @var list<string>
      */
     protected $fillable = [
@@ -33,8 +31,6 @@ class Import extends Model
     ];
 
     /**
-     * Get the attributes that should be cast.
-     *
      * @return array<string, string>
      */
     protected function casts(): array
@@ -67,8 +63,6 @@ class Import extends Model
     }
 
     /**
-     * The offers staged for this import.
-     *
      * @return HasMany<ImportOffer, $this>
      */
     public function stagedOffers(): HasMany

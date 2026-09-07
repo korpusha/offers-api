@@ -13,8 +13,6 @@ use Illuminate\Database\Eloquent\Factories\Factory;
 class OfferFactory extends Factory
 {
     /**
-     * Define the model's default state.
-     *
      * @return array<string, mixed>
      */
     public function definition(): array
@@ -37,9 +35,6 @@ class OfferFactory extends Factory
         ];
     }
 
-    /**
-     * Make the offer match a specific stay.
-     */
     public function forStay(string $checkIn, string $checkOut): static
     {
         return $this->state(fn (array $attributes): array => [
@@ -48,9 +43,6 @@ class OfferFactory extends Factory
         ]);
     }
 
-    /**
-     * Indicate that the offer expired.
-     */
     public function expired(): static
     {
         return $this->state(fn (array $attributes): array => [
@@ -58,9 +50,6 @@ class OfferFactory extends Factory
         ]);
     }
 
-    /**
-     * Indicate that every unit of the offer is already booked.
-     */
     public function soldOut(): static
     {
         return $this->state(fn (array $attributes): array => [

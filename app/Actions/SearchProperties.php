@@ -10,9 +10,6 @@ use Illuminate\Support\Facades\DB;
 class SearchProperties
 {
     /**
-     * Find properties that have a bookable offer for the requested stay,
-     * each carrying its cheapest one.
-     *
      * @param  array{check_in: string, check_out: string, guests: int, city?: string|null}  $criteria
      * @return LengthAwarePaginator<int, Property>
      */
@@ -50,8 +47,6 @@ class SearchProperties
     }
 
     /**
-     * Rank every bookable offer within its property, cheapest first.
-     *
      * @param  array{check_in: string, check_out: string, guests: int, city?: string|null}  $criteria
      */
     private function rankedOffers(array $criteria): QueryBuilder

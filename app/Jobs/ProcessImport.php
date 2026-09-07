@@ -26,19 +26,11 @@ class ProcessImport implements ShouldBeUnique, ShouldQueue
 
     public int $uniqueFor = 3600;
 
-    /**
-     * How many staged offers to hold in memory at a time.
-     */
     private const CHUNK = 500;
 
-    /**
-     * How many bytes of an exception message to keep against an offer.
-     */
     private const MESSAGE_BYTES = 1000;
 
     /**
-     * Properties resolved this run, keyed by their code.
-     *
      * @var array<string, int>
      */
     private array $propertyIds = [];
@@ -52,9 +44,6 @@ class ProcessImport implements ShouldBeUnique, ShouldQueue
         return (string) $this->importId;
     }
 
-    /**
-     * Apply the staged offers and settle the import's status.
-     */
     public function handle(): void
     {
         $import = Import::find($this->importId);
@@ -79,9 +68,6 @@ class ProcessImport implements ShouldBeUnique, ShouldQueue
         ]);
     }
 
-    /**
-     * Mark the import failed when the job gives up.
-     */
     public function failed(?Throwable $exception): void
     {
         Log::error('Import failed.', [
@@ -98,9 +84,6 @@ class ProcessImport implements ShouldBeUnique, ShouldQueue
             ]);
     }
 
-    /**
-     * Take ownership of the import for this run.
-     */
     private function claim(Import $import): bool
     {
         $claimed = Import::whereKey($import->getKey())
@@ -117,8 +100,6 @@ class ProcessImport implements ShouldBeUnique, ShouldQueue
     }
 
     /**
-     * The offers parked for this import.
-     *
      * @return Builder<ImportOffer>
      */
     private function staged(): Builder
@@ -126,9 +107,6 @@ class ProcessImport implements ShouldBeUnique, ShouldQueue
         return ImportOffer::where('import_id', $this->importId);
     }
 
-    /**
-     * Apply one staged offer, recording the outcome against it.
-     */
     private function applyOffer(Import $import, ImportOffer $staged): void
     {
         $offer = $staged->payload;
@@ -172,8 +150,6 @@ class ProcessImport implements ShouldBeUnique, ShouldQueue
     }
 
     /**
-     * Find the property by code, creating it when the code is new.
-     *
      * @param  array{code: string, name: string, city: string}  $property
      */
     private function resolvePropertyId(array $property): int
@@ -195,8 +171,6 @@ class ProcessImport implements ShouldBeUnique, ShouldQueue
     }
 
     /**
-     * Insert the offer, or update it only with data from a newer import.
-     *
      * @param  array<string, mixed>  $offer
      */
     private function upsertOffer(Import $import, array $offer, int $propertyId): void
@@ -250,9 +224,6 @@ class ProcessImport implements ShouldBeUnique, ShouldQueue
         );
     }
 
-    /**
-     * Count the offers this import skipped, or null when none were.
-     */
     private function skippedSummary(): ?string
     {
         $skipped = $this->staged()->where('status', ImportOfferStatus::Skipped)->count();

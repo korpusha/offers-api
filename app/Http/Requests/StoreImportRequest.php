@@ -7,14 +7,9 @@ use Illuminate\Validation\Rule;
 
 class StoreImportRequest extends FormRequest
 {
-    /**
-     * The most offers one import may carry.
-     */
     public const MAX_OFFERS = 5000;
 
     /**
-     * Get the validation rules that apply to the request.
-     *
      * @return array<string, mixed>
      */
     public function rules(): array
