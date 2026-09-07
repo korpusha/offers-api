@@ -2,9 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Enums\ImportOfferStatus;
 use App\Enums\ImportStatus;
 use App\Jobs\ProcessImport;
 use App\Models\Import;
+use App\Models\ImportOffer;
 use App\Models\Offer;
 use App\Models\Property;
 use App\Models\Supplier;
@@ -172,7 +174,7 @@ class ProcessImportTest extends TestCase
     {
         $import = $this->import();
 
-        (new ProcessImport($import->id, []))->failed(new RuntimeException('Supplier vanished.'));
+        (new ProcessImport($import->id))->failed(new RuntimeException('Supplier vanished.'));
 
         $import->refresh();
         $this->assertSame(ImportStatus::Failed, $import->status);
@@ -185,9 +187,101 @@ class ProcessImportTest extends TestCase
         $import = $this->import();
         $this->process($import, [$this->offer()]);
 
-        (new ProcessImport($import->id, []))->failed(new RuntimeException('Too late.'));
+        (new ProcessImport($import->id))->failed(new RuntimeException('Too late.'));
 
         $this->assertSame(ImportStatus::Completed, $import->refresh()->status);
+    }
+
+    public function test_it_records_the_outcome_against_each_staged_offer(): void
+    {
+        $import = $this->import();
+
+        $this->process($import, [
+            $this->offer(externalId: 'offer-good'),
+            $this->offer(externalId: 'offer-bad', currency: 'EUROS'),
+        ]);
+
+        $this->assertDatabaseHas('import_offers', [
+            'import_id' => $import->id,
+            'external_id' => 'offer-good',
+            'status' => ImportOfferStatus::Applied->value,
+            'error_code' => null,
+            'error_message' => null,
+        ]);
+
+        $bad = ImportOffer::where('external_id', 'offer-bad')->sole();
+        $this->assertSame(ImportOfferStatus::Skipped, $bad->status);
+        $this->assertStringStartsWith('sqlstate:', (string) $bad->error_code);
+        $this->assertNotNull($bad->error_message);
+    }
+
+    public function test_a_rerun_leaves_offers_it_already_applied_alone(): void
+    {
+        $import = $this->import();
+        $this->process($import, [$this->offer()]);
+
+        $applied = ImportOffer::sole();
+        $this->assertSame(ImportOfferStatus::Applied, $applied->status);
+
+        $import->update(['status' => ImportStatus::Processing]);
+        (new ProcessImport($import->id))->handle();
+
+        $import->refresh();
+        $this->assertSame(ImportStatus::Completed, $import->status);
+        $this->assertSame(1, $import->processed_offers);
+        $this->assertSame(1, Offer::count());
+        $this->assertEquals($applied->updated_at, ImportOffer::sole()->updated_at);
+    }
+
+    public function test_a_rerun_after_a_partial_run_reports_the_whole_import(): void
+    {
+        $import = $this->import();
+
+        $this->stage($import, [
+            $this->offer(externalId: 'offer-1'),
+            $this->offer(externalId: 'offer-2'),
+        ]);
+
+        // The first run got through one offer and skipped the other before
+        // the worker died, leaving nothing pending.
+        ImportOffer::where('external_id', 'offer-1')->update([
+            'status' => ImportOfferStatus::Applied,
+        ]);
+        ImportOffer::where('external_id', 'offer-2')->update([
+            'status' => ImportOfferStatus::Skipped,
+            'error_code' => 'unexpected_error',
+            'error_message' => 'Worker vanished.',
+        ]);
+
+        $import->update(['status' => ImportStatus::Processing]);
+        (new ProcessImport($import->id))->handle();
+
+        $import->refresh();
+        $this->assertSame(1, $import->processed_offers);
+        $this->assertStringContainsString('Skipped 1 of 2 offers', (string) $import->error);
+        $this->assertStringContainsString('offer-2', (string) $import->error);
+    }
+
+    public function test_it_processes_an_import_larger_than_one_chunk(): void
+    {
+        $import = $this->import();
+
+        $offers = [];
+
+        for ($i = 1; $i <= 750; $i++) {
+            $offers[] = $this->offer(
+                externalId: 'offer-'.$i,
+                propertyCode: 'BCN-'.str_pad((string) $i, 4, '0', STR_PAD_LEFT),
+            );
+        }
+
+        $this->process($import, $offers);
+
+        $import->refresh();
+        $this->assertSame(ImportStatus::Completed, $import->status);
+        $this->assertSame(750, $import->processed_offers);
+        $this->assertSame(750, Offer::count());
+        $this->assertSame(0, ImportOffer::where('status', ImportOfferStatus::Pending)->count());
     }
 
     /**
@@ -195,7 +289,25 @@ class ProcessImportTest extends TestCase
      */
     private function process(Import $import, array $offers): void
     {
-        (new ProcessImport($import->id, $offers))->handle();
+        $this->stage($import, $offers);
+
+        (new ProcessImport($import->id))->handle();
+    }
+
+    /**
+     * Park offers against an import the way RegisterImport does.
+     *
+     * @param  array<int, array<string, mixed>>  $offers
+     */
+    private function stage(Import $import, array $offers): void
+    {
+        foreach ($offers as $offer) {
+            ImportOffer::factory()->create([
+                'import_id' => $import->id,
+                'external_id' => $offer['external_id'],
+                'payload' => $offer,
+            ]);
+        }
     }
 
     private function import(

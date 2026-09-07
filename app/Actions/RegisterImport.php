@@ -2,10 +2,12 @@
 
 namespace App\Actions;
 
+use App\Enums\ImportOfferStatus;
 use App\Enums\ImportStatus;
 use App\Exceptions\StaleImportException;
 use App\Jobs\ProcessImport;
 use App\Models\Import;
+use App\Models\ImportOffer;
 use App\Models\Supplier;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
@@ -14,6 +16,14 @@ use RuntimeException;
 
 class RegisterImport
 {
+    /**
+     * How many staged offers to write per INSERT statement.
+     *
+     * MySQL caps a prepared statement at 65,535 placeholders, which the
+     * staging columns would reach at roughly nine thousand rows.
+     */
+    private const STAGE_CHUNK = 1000;
+
     /**
      * Record an incoming import and queue it for processing.
      *
@@ -44,12 +54,41 @@ class RegisterImport
                     'total_offers' => count($payload['offers']),
                 ]);
 
-                ProcessImport::dispatch($import->id, $payload['offers'])->afterCommit();
+                $this->stage($import, $payload['offers']);
+
+                ProcessImport::dispatch($import->id)->afterCommit();
 
                 return $import;
             });
         } catch (UniqueConstraintViolationException) {
-            return $this->findExisting($supplier, $payload['external_import_id']);
+            return $this->findExisting($supplier, $payload['external_import_id'])
+                ?? throw new RuntimeException('Import row vanished after a unique constraint violation.');
+        }
+    }
+
+    /**
+     * Park the offers as they arrived, for the job to pick up.
+     *
+     * Staging shares the caller's transaction: an import must never become
+     * visible without the offers it promised.
+     *
+     * @param  array<int, array<string, mixed>>  $offers
+     */
+    private function stage(Import $import, array $offers): void
+    {
+        $now = now();
+
+        $rows = array_map(fn (array $offer): array => [
+            'import_id' => $import->getKey(),
+            'external_id' => $offer['external_id'],
+            'payload' => json_encode($offer, JSON_THROW_ON_ERROR),
+            'status' => ImportOfferStatus::Pending->value,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ], $offers);
+
+        foreach (array_chunk($rows, self::STAGE_CHUNK) as $chunk) {
+            ImportOffer::insert($chunk);
         }
     }
 

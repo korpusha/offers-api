@@ -86,6 +86,9 @@ initialization.
 
 Accepts an import, queues it and immediately returns `202`.
 
+At most **5000 offers** per import. Larger catalogues are split across several imports, each
+with its own `external_import_id` and a later `sent_at`.
+
 ```json
 {
   "supplier": "supplier-a",
@@ -178,7 +181,7 @@ GET /api/properties?city=Barcelona&check_in=2026-10-10&check_out=2026-10-15&gues
 |---|---|---|
 | `POST /api/imports` | `202` | Created and queued, **or** the import already exists |
 | | `409` | `sent_at` is not newer than the supplier's latest import |
-| | `422` | Invalid structure or unknown supplier |
+| | `422` | Invalid structure, unknown supplier, or more than 5000 offers |
 | `GET /api/imports/{import}` | `200` | Current state |
 | | `404` | Not found |
 | `GET /api/properties` | `200` | A page of results |
@@ -188,6 +191,42 @@ GET /api/properties?city=Barcelona&check_in=2026-10-10&check_out=2026-10-15&gues
 | | `409` | No units left, or the offer expired |
 | | `422` | Invalid body |
 | | `404` | Offer not found |
+
+---
+
+## How an import is processed
+
+The request never hands the offers to the queue. `RegisterImport` writes the `imports` row and
+parks every offer in **`import_offers`** in the same transaction, then dispatches
+`ProcessImport` carrying nothing but the import id.
+
+That keeps the queue message a few bytes wide no matter how large the import, so a retry costs
+nothing to re-serialize, and it gives each offer somewhere to record its own outcome
+(`pending` → `applied` / `skipped`, with an error code) instead of everything landing in one
+free-text field on the import.
+
+`ProcessImport` walks the staged offers with `chunkById`, filtering on `status = pending`. A
+job that dies half-way and is retried therefore resumes rather than restarting: offers already
+applied are no longer pending and are skipped over. `processed_offers` and the skipped summary
+are read back from the staged rows at the end, not counted in memory, so a resumed run still
+reports the whole import rather than only the part it saw.
+
+Staged offers are the import's audit trail, and they are pruned along with the import itself —
+see [Retention](#retention).
+
+---
+
+## Retention
+
+Imports older than `IMPORT_RETENTION_DAYS` (default **90**) are removed by the scheduled
+`model:prune` command, taking their staged offers with them via `ON DELETE CASCADE`.
+
+Offers still in the catalogue survive; they only lose `last_import_id`, which is provenance
+rather than data. Run the scheduler for this to happen:
+
+```bash
+./vendor/bin/sail artisan schedule:work
+```
 
 ---
 
@@ -267,12 +306,16 @@ column.
 ./vendor/bin/sail artisan test
 ```
 
-68 tests. They cover what the task is actually about:
+78 tests. They cover what the task is actually about:
 
 - a repeated import neither duplicates the record nor queues the job twice (`Queue::fake`);
 - an import with an older `sent_at` is rejected with `409`;
 - an older import does not overwrite a newer one's data when processed out of order;
 - a faulty offer is skipped and the import still finishes as `completed`;
+- the outcome of every offer is recorded against its staged row;
+- a job rerun after a partial run resumes instead of reapplying, and still reports the whole import;
+- an import larger than one chunk is processed in full, and one over the cap is rejected;
+- pruning removes an expired import and its staged offers but leaves the catalogue standing;
 - the search returns the cheapest offer and ignores expired and sold out ones;
 - a property stays in the results when its cheapest offer is filtered out;
 - pagination is stable when prices tie;
@@ -287,7 +330,7 @@ column.
 ```
 app/
 ├── Actions/          # business logic: RegisterImport, SearchProperties, CreateReservation
-├── Enums/            # ImportStatus
+├── Enums/            # ImportStatus, ImportOfferStatus
 ├── Exceptions/       # StaleImportException, OfferNotBookableException
 ├── Http/
 │   ├── Controllers/Api/

@@ -2,9 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Enums\ImportOfferStatus;
 use App\Enums\ImportStatus;
+use App\Http\Requests\StoreImportRequest;
 use App\Jobs\ProcessImport;
 use App\Models\Import;
+use App\Models\ImportOffer;
 use App\Models\Supplier;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -151,6 +154,48 @@ class StoreImportTest extends TestCase
         $this->postJson('/api/imports', $payload)
             ->assertUnprocessable()
             ->assertJsonValidationErrors('offers.0.price');
+    }
+
+    public function test_it_stages_the_offers_for_the_job(): void
+    {
+        $this->postJson('/api/imports', $this->payload())->assertAccepted();
+
+        $import = Import::sole();
+        $staged = ImportOffer::sole();
+
+        $this->assertSame($import->id, $staged->import_id);
+        $this->assertSame('offer-a-10001', $staged->external_id);
+        $this->assertSame(ImportOfferStatus::Pending, $staged->status);
+        $this->assertSame($import->total_offers, ImportOffer::count());
+        // validated() orders keys by rule, not by the order they arrived in.
+        $this->assertEquals($this->payload()['offers'][0], $staged->payload);
+    }
+
+    public function test_a_rejected_import_stages_nothing(): void
+    {
+        $this->postJson('/api/imports', $this->payload(supplier: 'supplier-zzz'))
+            ->assertUnprocessable();
+
+        $this->assertSame(0, Import::count());
+        $this->assertSame(0, ImportOffer::count());
+    }
+
+    public function test_it_rejects_an_import_larger_than_the_cap(): void
+    {
+        $payload = $this->payload();
+        $offer = $payload['offers'][0];
+        $payload['offers'] = [];
+
+        for ($i = 0; $i <= StoreImportRequest::MAX_OFFERS; $i++) {
+            $payload['offers'][] = ['external_id' => 'offer-'.$i] + $offer;
+        }
+
+        $this->postJson('/api/imports', $payload)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('offers');
+
+        $this->assertSame(0, ImportOffer::count());
+        Queue::assertNothingPushed();
     }
 
     /**

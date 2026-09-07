@@ -8,6 +8,14 @@ use Illuminate\Validation\Rule;
 class StoreImportRequest extends FormRequest
 {
     /**
+     * The most offers one import may carry.
+     *
+     * Larger catalogues are split across several imports, each with its own
+     * external_import_id and a later sent_at.
+     */
+    public const MAX_OFFERS = 5000;
+
+    /**
      * Get the validation rules that apply to the request.
      *
      * @return array<string, mixed>
@@ -19,7 +27,7 @@ class StoreImportRequest extends FormRequest
             'external_import_id' => ['required', 'string', 'max:128'],
             'sent_at' => ['required', 'date'],
 
-            'offers' => ['required', 'array', 'min:1'],
+            'offers' => ['required', 'array', 'min:1', 'max:'.self::MAX_OFFERS],
             'offers.*.external_id' => ['required', 'string', 'max:128'],
 
             'offers.*.property' => ['required', 'array'],

@@ -2,11 +2,15 @@
 
 namespace App\Jobs;
 
+use App\Enums\ImportOfferStatus;
 use App\Enums\ImportStatus;
 use App\Models\Import;
+use App\Models\ImportOffer;
 use App\Models\Property;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Carbon;
@@ -22,11 +26,14 @@ class ProcessImport implements ShouldBeUnique, ShouldQueue
     public int $uniqueFor = 3600;
 
     /**
-     * Offers skipped this run, as "external_id: reason".
-     *
-     * @var list<string>
+     * How many staged offers to hold in memory at a time.
      */
-    private array $skipped = [];
+    private const CHUNK = 500;
+
+    /**
+     * How many bytes of an exception message to keep against an offer.
+     */
+    private const MESSAGE_BYTES = 1000;
 
     /**
      * Properties resolved this run, keyed by their code.
@@ -35,12 +42,8 @@ class ProcessImport implements ShouldBeUnique, ShouldQueue
      */
     private array $propertyIds = [];
 
-    /**
-     * @param  array<int, array<string, mixed>>  $offers
-     */
     public function __construct(
         public int $importId,
-        public array $offers,
     ) {}
 
     public function uniqueId(): string
@@ -49,7 +52,7 @@ class ProcessImport implements ShouldBeUnique, ShouldQueue
     }
 
     /**
-     * Apply the imported offers and settle the import's status.
+     * Apply the staged offers and settle the import's status.
      */
     public function handle(): void
     {
@@ -59,18 +62,18 @@ class ProcessImport implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        $processed = 0;
-
-        foreach ($this->offers as $offer) {
-            if ($this->applyOffer($import, $offer)) {
-                $processed++;
-            }
-        }
+        $this->staged()
+            ->where('status', ImportOfferStatus::Pending)
+            ->chunkById(self::CHUNK, function ($offers) use ($import): void {
+                foreach ($offers as $offer) {
+                    $this->applyOffer($import, $offer);
+                }
+            });
 
         $import->update([
             'status' => ImportStatus::Completed,
-            'processed_offers' => $processed,
-            'error' => $this->skippedSummary(count($this->offers)),
+            'processed_offers' => $this->staged()->where('status', ImportOfferStatus::Applied)->count(),
+            'error' => $this->skippedSummary(),
             'completed_at' => now(),
         ]);
     }
@@ -108,27 +111,59 @@ class ProcessImport implements ShouldBeUnique, ShouldQueue
     }
 
     /**
-     * @param  array<string, mixed>  $offer
+     * The offers parked for this import.
+     *
+     * @return Builder<ImportOffer>
      */
-    private function applyOffer(Import $import, array $offer): bool
+    private function staged(): Builder
     {
+        return ImportOffer::where('import_id', $this->importId);
+    }
+
+    /**
+     * Apply one staged offer, recording the outcome against it.
+     *
+     * A skipped offer leaves the catalogue untouched; the import carries on.
+     */
+    private function applyOffer(Import $import, ImportOffer $staged): void
+    {
+        $offer = $staged->payload;
+
         try {
-            $propertyId = DB::transaction(function () use ($import, $offer): int {
+            $propertyId = DB::transaction(function () use ($import, $offer, $staged): int {
                 $propertyId = $this->resolvePropertyId($offer['property']);
 
                 $this->upsertOffer($import, $offer, $propertyId);
+
+                $staged->update([
+                    'status' => ImportOfferStatus::Applied,
+                    'error_code' => null,
+                    'error_message' => null,
+                ]);
 
                 return $propertyId;
             });
 
             $this->propertyIds[$offer['property']['code']] = $propertyId;
-
-            return true;
         } catch (Throwable $e) {
-            $this->skipped[] = $offer['external_id'].': '.$e->getMessage();
-
-            return false;
+            // The transaction is gone, and with it anything the model thinks
+            // it wrote, so record the outcome straight against the row.
+            ImportOffer::whereKey($staged->getKey())->update([
+                'status' => ImportOfferStatus::Skipped,
+                'error_code' => $this->errorCode($e),
+                'error_message' => mb_strcut($e->getMessage(), 0, self::MESSAGE_BYTES),
+            ]);
         }
+    }
+
+    /**
+     * Classify a failure well enough to group by it later.
+     */
+    private function errorCode(Throwable $e): string
+    {
+        return $e instanceof QueryException
+            ? 'sqlstate:'.$e->getCode()
+            : 'unexpected_error';
     }
 
     /**
@@ -211,16 +246,26 @@ class ProcessImport implements ShouldBeUnique, ShouldQueue
     }
 
     /**
-     * Describe the offers skipped this run, or null when none were.
+     * Describe the offers this import skipped, or null when none were.
+     *
+     * Read back from the staged rows rather than counted in memory, so a
+     * retry that resumes half-way still reports the whole import.
      */
-    private function skippedSummary(int $total): ?string
+    private function skippedSummary(): ?string
     {
-        if ($this->skipped === []) {
+        $skipped = $this->staged()
+            ->where('status', ImportOfferStatus::Skipped)
+            ->orderBy('id')
+            ->get(['external_id', 'error_message']);
+
+        if ($skipped->isEmpty()) {
             return null;
         }
 
-        $summary = sprintf('Skipped %d of %d offers. ', count($this->skipped), $total)
-            .implode('; ', $this->skipped);
+        $summary = sprintf('Skipped %d of %d offers. ', $skipped->count(), $this->staged()->count())
+            .$skipped
+                ->map(fn (ImportOffer $offer): string => $offer->external_id.': '.$offer->error_message)
+                ->implode('; ');
 
         return mb_substr($summary, 0, 60_000);
     }
