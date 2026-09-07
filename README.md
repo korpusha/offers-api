@@ -313,7 +313,11 @@ second offer.
 
 **No authentication** — deliberately, per the scope of the task: "we are interested in the
 database structure, working with Laravel, SQL queries, queues, transactions and automated
-tests".
+tests". The default scaffolding that came with it — the `User` model, `config/auth.php`,
+`config/session.php` and the `users`/`sessions` tables — is removed rather than left dormant.
+
+**No frontend.** There is no `routes/web.php`, no Blade views and no asset pipeline: the only
+entry points are the API routes and `/up`. `GET /` returns `404`.
 
 **Results are ordered by the best offer's price**, because finding the cheapest accommodation is
 the whole point of the query.
@@ -344,7 +348,7 @@ column.
 ./vendor/bin/sail artisan test
 ```
 
-82 tests. They cover what the task is actually about:
+81 tests. They cover what the task is actually about:
 
 - a repeated import neither duplicates the record nor queues the job twice (`Queue::fake`);
 - an import with an older `sent_at` is rejected with `409`;
