@@ -9,9 +9,6 @@ class StoreImportRequest extends FormRequest
 {
     /**
      * The most offers one import may carry.
-     *
-     * Larger catalogues are split across several imports, each with its own
-     * external_import_id and a later sent_at.
      */
     public const MAX_OFFERS = 5000;
 

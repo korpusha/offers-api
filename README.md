@@ -127,6 +127,7 @@ with its own `external_import_id` and a later `sent_at`.
     "total_offers": 20,
     "processed_offers": 20,
     "error": null,
+    "skipped": [],
     "created_at": "2026-09-01T10:00:02Z",
     "completed_at": "2026-09-01T10:00:04Z"
   }
@@ -134,6 +135,23 @@ with its own `external_import_id` and a later `sent_at`.
 ```
 
 Statuses: `pending`, `processing`, `completed`, `failed`.
+
+`error` is a summary, never a raw failure. An import that could not apply every offer names
+them in `skipped` — at most fifty, with the count in `error`:
+
+```json
+{
+  "error": "Skipped 2 of 20 offers.",
+  "skipped": [
+    { "external_id": "offer-a-3", "code": "invalid_data" },
+    { "external_id": "offer-a-7", "code": "constraint_violation" }
+  ]
+}
+```
+
+Codes: `invalid_data` (the offer does not fit the catalogue), `constraint_violation` (it
+contradicts something already there). What actually threw goes to the log, keyed by import and
+`external_id`; it is never returned.
 
 ### `GET /api/properties`
 
@@ -213,6 +231,26 @@ reports the whole import rather than only the part it saw.
 
 Staged offers are the import's audit trail, and they are pruned along with the import itself —
 see [Retention](#retention).
+
+### When an offer fails
+
+A staged offer ends in one of three states, and the difference decides whether the import
+carries on:
+
+| | Meaning | What happens |
+|---|---|---|
+| `applied` | Written to the catalogue | Done |
+| `skipped` | The offer itself is at fault | Recorded with a code; the import carries on and completes |
+| `pending` | Nothing about the offer explains the failure | The job fails, the queue retries, the offer is tried again |
+
+Only a failure that describes the row — SQLSTATE class `22` (bad value) or `23` (constraint) —
+counts as the offer's fault. Everything else is treated as a failure of the run: a lost
+connection, a deadlock, a bug. Those are re-thrown rather than filed against the offer, so a
+retry can pick the row up and, once the attempts run out, the import ends as `failed` instead
+of reporting `completed` over silently dropped offers.
+
+The default matters more than the list. Anything unrecognised fails loudly; only what is
+explicitly known to be the offer's own problem is skipped.
 
 ---
 
@@ -306,13 +344,15 @@ column.
 ./vendor/bin/sail artisan test
 ```
 
-78 tests. They cover what the task is actually about:
+82 tests. They cover what the task is actually about:
 
 - a repeated import neither duplicates the record nor queues the job twice (`Queue::fake`);
 - an import with an older `sent_at` is rejected with `409`;
 - an older import does not overwrite a newer one's data when processed out of order;
 - a faulty offer is skipped and the import still finishes as `completed`;
 - the outcome of every offer is recorded against its staged row;
+- a failure that is not the offer's fault leaves it pending and stops the import;
+- the status endpoint returns codes for skipped offers, never the underlying failure;
 - a job rerun after a partial run resumes instead of reapplying, and still reports the whole import;
 - an import larger than one chunk is processed in full, and one over the cap is rejected;
 - pruning removes an expired import and its staged offers but leaves the catalogue standing;
@@ -330,7 +370,7 @@ column.
 ```
 app/
 ├── Actions/          # business logic: RegisterImport, SearchProperties, CreateReservation
-├── Enums/            # ImportStatus, ImportOfferStatus
+├── Enums/            # ImportStatus, ImportOfferStatus, ImportOfferError
 ├── Exceptions/       # StaleImportException, OfferNotBookableException
 ├── Http/
 │   ├── Controllers/Api/

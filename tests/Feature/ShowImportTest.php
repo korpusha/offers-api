@@ -2,8 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Enums\ImportOfferError;
 use App\Enums\ImportStatus;
 use App\Models\Import;
+use App\Models\ImportOffer;
 use App\Models\Supplier;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -31,7 +33,8 @@ class ShowImportTest extends TestCase
             ->assertJsonPath('data.status', ImportStatus::Completed->value)
             ->assertJsonPath('data.total_offers', 20)
             ->assertJsonPath('data.processed_offers', 20)
-            ->assertJsonPath('data.error', null);
+            ->assertJsonPath('data.error', null)
+            ->assertJsonPath('data.skipped', []);
     }
 
     public function test_a_pending_import_has_no_completion_details(): void
@@ -49,25 +52,61 @@ class ShowImportTest extends TestCase
     public function test_it_reports_a_partially_processed_import(): void
     {
         $import = Import::factory()->completed(totalOffers: 20, processedOffers: 18)->create([
-            'error' => 'Skipped 2 of 20 offers. offer-a-3: bad currency',
+            'error' => 'Skipped 2 of 20 offers.',
         ]);
 
-        $this->getJson("/api/imports/{$import->id}")
+        ImportOffer::factory()->for($import)->applied()->create();
+        ImportOffer::factory()->for($import)->skipped(
+            ImportOfferError::InvalidData->value,
+            "SQLSTATE[22001]: Data too long for column 'currency'",
+        )->create(['external_id' => 'offer-a-3']);
+
+        $response = $this->getJson("/api/imports/{$import->id}")
             ->assertOk()
             ->assertJsonPath('data.status', ImportStatus::Completed->value)
             ->assertJsonPath('data.total_offers', 20)
             ->assertJsonPath('data.processed_offers', 18)
-            ->assertJsonPath('data.error', 'Skipped 2 of 20 offers. offer-a-3: bad currency');
+            ->assertJsonPath('data.error', 'Skipped 2 of 20 offers.')
+            ->assertJsonPath('data.skipped', [
+                ['external_id' => 'offer-a-3', 'code' => ImportOfferError::InvalidData->value],
+            ]);
+
+        $this->assertStringNotContainsString('SQLSTATE', $response->getContent());
+    }
+
+    public function test_it_names_at_most_fifty_skipped_offers(): void
+    {
+        $import = Import::factory()->completed(totalOffers: 60, processedOffers: 0)->create([
+            'error' => 'Skipped 60 of 60 offers.',
+        ]);
+
+        ImportOffer::factory()->for($import)->skipped()->count(60)->create();
+
+        $this->getJson("/api/imports/{$import->id}")
+            ->assertOk()
+            ->assertJsonCount(50, 'data.skipped')
+            ->assertJsonPath('data.error', 'Skipped 60 of 60 offers.');
+    }
+
+    public function test_a_pending_offer_is_not_reported_as_skipped(): void
+    {
+        $import = Import::factory()->create();
+
+        ImportOffer::factory()->for($import)->create();
+
+        $this->getJson("/api/imports/{$import->id}")
+            ->assertOk()
+            ->assertJsonPath('data.skipped', []);
     }
 
     public function test_it_reports_a_failed_import(): void
     {
-        $import = Import::factory()->failed('Supplier vanished.')->create();
+        $import = Import::factory()->failed()->create();
 
         $this->getJson("/api/imports/{$import->id}")
             ->assertOk()
             ->assertJsonPath('data.status', ImportStatus::Failed->value)
-            ->assertJsonPath('data.error', 'Supplier vanished.');
+            ->assertJsonPath('data.error', 'Import failed.');
     }
 
     public function test_it_returns_the_expected_fields_only(): void
@@ -79,10 +118,11 @@ class ShowImportTest extends TestCase
             ->assertJsonStructure([
                 'data' => [
                     'id', 'supplier', 'external_import_id', 'sent_at', 'status',
-                    'total_offers', 'processed_offers', 'error', 'created_at', 'completed_at',
+                    'total_offers', 'processed_offers', 'error', 'skipped',
+                    'created_at', 'completed_at',
                 ],
             ])
-            ->assertJsonCount(10, 'data');
+            ->assertJsonCount(11, 'data');
     }
 
     public function test_it_returns_404_for_an_unknown_import(): void

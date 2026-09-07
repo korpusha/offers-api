@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\ImportOfferError;
 use App\Enums\ImportOfferStatus;
 use App\Enums\ImportStatus;
 use App\Jobs\ProcessImport;
@@ -13,6 +14,7 @@ use App\Models\Supplier;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use RuntimeException;
 use Tests\TestCase;
+use Throwable;
 
 class ProcessImportTest extends TestCase
 {
@@ -130,8 +132,7 @@ class ProcessImportTest extends TestCase
         $import->refresh();
         $this->assertSame(ImportStatus::Completed, $import->status);
         $this->assertSame(1, $import->processed_offers);
-        $this->assertStringContainsString('Skipped 1 of 2 offers', (string) $import->error);
-        $this->assertStringContainsString('offer-bad', (string) $import->error);
+        $this->assertSame('Skipped 1 of 2 offers.', $import->error);
         $this->assertSame(1, Offer::count());
     }
 
@@ -178,7 +179,7 @@ class ProcessImportTest extends TestCase
 
         $import->refresh();
         $this->assertSame(ImportStatus::Failed, $import->status);
-        $this->assertSame('Supplier vanished.', $import->error);
+        $this->assertSame('Import failed.', $import->error);
         $this->assertNotNull($import->completed_at);
     }
 
@@ -211,7 +212,7 @@ class ProcessImportTest extends TestCase
 
         $bad = ImportOffer::where('external_id', 'offer-bad')->sole();
         $this->assertSame(ImportOfferStatus::Skipped, $bad->status);
-        $this->assertStringStartsWith('sqlstate:', (string) $bad->error_code);
+        $this->assertSame(ImportOfferError::InvalidData->value, $bad->error_code);
         $this->assertNotNull($bad->error_message);
     }
 
@@ -242,8 +243,6 @@ class ProcessImportTest extends TestCase
             $this->offer(externalId: 'offer-2'),
         ]);
 
-        // The first run got through one offer and skipped the other before
-        // the worker died, leaving nothing pending.
         ImportOffer::where('external_id', 'offer-1')->update([
             'status' => ImportOfferStatus::Applied,
         ]);
@@ -258,8 +257,7 @@ class ProcessImportTest extends TestCase
 
         $import->refresh();
         $this->assertSame(1, $import->processed_offers);
-        $this->assertStringContainsString('Skipped 1 of 2 offers', (string) $import->error);
-        $this->assertStringContainsString('offer-2', (string) $import->error);
+        $this->assertSame('Skipped 1 of 2 offers.', $import->error);
     }
 
     public function test_it_processes_an_import_larger_than_one_chunk(): void
@@ -284,6 +282,41 @@ class ProcessImportTest extends TestCase
         $this->assertSame(0, ImportOffer::where('status', ImportOfferStatus::Pending)->count());
     }
 
+    public function test_a_failure_that_is_not_about_the_offer_stops_the_import(): void
+    {
+        $import = $this->import();
+
+        ImportOffer::factory()->create([
+            'import_id' => $import->id,
+            'external_id' => 'offer-broken',
+            'payload' => ['external_id' => 'offer-broken'],
+        ]);
+
+        $threw = false;
+
+        try {
+            (new ProcessImport($import->id))->handle();
+        } catch (Throwable) {
+            $threw = true;
+        }
+
+        $this->assertTrue($threw, 'The job should have let the failure through.');
+
+        $this->assertSame(ImportOfferStatus::Pending, ImportOffer::sole()->status);
+        $this->assertSame(ImportStatus::Processing, $import->refresh()->status);
+    }
+
+    public function test_the_failed_hook_does_not_repeat_the_exception(): void
+    {
+        $import = $this->import();
+
+        (new ProcessImport($import->id))->failed(
+            new RuntimeException('SQLSTATE[42S02]: insert into `offers` (`price`) values (1)'),
+        );
+
+        $this->assertSame('Import failed.', $import->refresh()->error);
+    }
+
     /**
      * @param  array<int, array<string, mixed>>  $offers
      */
@@ -295,8 +328,6 @@ class ProcessImportTest extends TestCase
     }
 
     /**
-     * Park offers against an import the way RegisterImport does.
-     *
      * @param  array<int, array<string, mixed>>  $offers
      */
     private function stage(Import $import, array $offers): void

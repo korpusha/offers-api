@@ -167,7 +167,6 @@ class StoreImportTest extends TestCase
         $this->assertSame('offer-a-10001', $staged->external_id);
         $this->assertSame(ImportOfferStatus::Pending, $staged->status);
         $this->assertSame($import->total_offers, ImportOffer::count());
-        // validated() orders keys by rule, not by the order they arrived in.
         $this->assertEquals($this->payload()['offers'][0], $staged->payload);
     }
 

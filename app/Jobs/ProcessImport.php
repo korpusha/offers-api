@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Enums\ImportOfferError;
 use App\Enums\ImportOfferStatus;
 use App\Enums\ImportStatus;
 use App\Models\Import;
@@ -10,11 +11,11 @@ use App\Models\Property;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class ProcessImport implements ShouldBeUnique, ShouldQueue
@@ -83,11 +84,16 @@ class ProcessImport implements ShouldBeUnique, ShouldQueue
      */
     public function failed(?Throwable $exception): void
     {
+        Log::error('Import failed.', [
+            'import_id' => $this->importId,
+            'exception' => $exception,
+        ]);
+
         Import::whereKey($this->importId)
             ->whereIn('status', [ImportStatus::Pending, ImportStatus::Processing])
             ->update([
                 'status' => ImportStatus::Failed,
-                'error' => $exception?->getMessage() ?? 'Import failed.',
+                'error' => 'Import failed.',
                 'completed_at' => now(),
             ]);
     }
@@ -122,8 +128,6 @@ class ProcessImport implements ShouldBeUnique, ShouldQueue
 
     /**
      * Apply one staged offer, recording the outcome against it.
-     *
-     * A skipped offer leaves the catalogue untouched; the import carries on.
      */
     private function applyOffer(Import $import, ImportOffer $staged): void
     {
@@ -146,24 +150,25 @@ class ProcessImport implements ShouldBeUnique, ShouldQueue
 
             $this->propertyIds[$offer['property']['code']] = $propertyId;
         } catch (Throwable $e) {
-            // The transaction is gone, and with it anything the model thinks
-            // it wrote, so record the outcome straight against the row.
+            $reason = ImportOfferError::for($e);
+
+            if ($reason === null) {
+                throw $e;
+            }
+
+            Log::warning('Import offer skipped.', [
+                'import_id' => $this->importId,
+                'external_id' => $staged->external_id,
+                'reason' => $reason->value,
+                'exception' => $e,
+            ]);
+
             ImportOffer::whereKey($staged->getKey())->update([
                 'status' => ImportOfferStatus::Skipped,
-                'error_code' => $this->errorCode($e),
+                'error_code' => $reason->value,
                 'error_message' => mb_strcut($e->getMessage(), 0, self::MESSAGE_BYTES),
             ]);
         }
-    }
-
-    /**
-     * Classify a failure well enough to group by it later.
-     */
-    private function errorCode(Throwable $e): string
-    {
-        return $e instanceof QueryException
-            ? 'sqlstate:'.$e->getCode()
-            : 'unexpected_error';
     }
 
     /**
@@ -246,27 +251,16 @@ class ProcessImport implements ShouldBeUnique, ShouldQueue
     }
 
     /**
-     * Describe the offers this import skipped, or null when none were.
-     *
-     * Read back from the staged rows rather than counted in memory, so a
-     * retry that resumes half-way still reports the whole import.
+     * Count the offers this import skipped, or null when none were.
      */
     private function skippedSummary(): ?string
     {
-        $skipped = $this->staged()
-            ->where('status', ImportOfferStatus::Skipped)
-            ->orderBy('id')
-            ->get(['external_id', 'error_message']);
+        $skipped = $this->staged()->where('status', ImportOfferStatus::Skipped)->count();
 
-        if ($skipped->isEmpty()) {
+        if ($skipped === 0) {
             return null;
         }
 
-        $summary = sprintf('Skipped %d of %d offers. ', $skipped->count(), $this->staged()->count())
-            .$skipped
-                ->map(fn (ImportOffer $offer): string => $offer->external_id.': '.$offer->error_message)
-                ->implode('; ');
-
-        return mb_substr($summary, 0, 60_000);
+        return sprintf('Skipped %d of %d offers.', $skipped, $this->staged()->count());
     }
 }

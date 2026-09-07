@@ -18,9 +18,6 @@ class RegisterImport
 {
     /**
      * How many staged offers to write per INSERT statement.
-     *
-     * MySQL caps a prepared statement at 65,535 placeholders, which the
-     * staging columns would reach at roughly nine thousand rows.
      */
     private const STAGE_CHUNK = 1000;
 
@@ -68,9 +65,6 @@ class RegisterImport
 
     /**
      * Park the offers as they arrived, for the job to pick up.
-     *
-     * Staging shares the caller's transaction: an import must never become
-     * visible without the offers it promised.
      *
      * @param  array<int, array<string, mixed>>  $offers
      */

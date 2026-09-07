@@ -2,7 +2,9 @@
 
 namespace App\Http\Resources;
 
+use App\Enums\ImportOfferStatus;
 use App\Models\Import;
+use App\Models\ImportOffer;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Carbon;
@@ -12,6 +14,11 @@ use Illuminate\Support\Carbon;
  */
 class ImportResource extends JsonResource
 {
+    /**
+     * How many skipped offers to name.
+     */
+    private const SKIPPED_LIMIT = 50;
+
     /**
      * Transform the resource into an array.
      *
@@ -28,9 +35,29 @@ class ImportResource extends JsonResource
             'total_offers' => $this->total_offers,
             'processed_offers' => $this->processed_offers,
             'error' => $this->error,
+            'skipped' => $this->skipped(),
             'created_at' => $this->zulu($this->created_at),
             'completed_at' => $this->zulu($this->completed_at),
         ];
+    }
+
+    /**
+     * Name the offers this import could not apply, and why.
+     *
+     * @return array<int, array{external_id: string, code: string|null}>
+     */
+    private function skipped(): array
+    {
+        return $this->stagedOffers()
+            ->where('status', ImportOfferStatus::Skipped)
+            ->orderBy('id')
+            ->limit(self::SKIPPED_LIMIT)
+            ->get(['external_id', 'error_code'])
+            ->map(fn (ImportOffer $offer): array => [
+                'external_id' => $offer->external_id,
+                'code' => $offer->error_code,
+            ])
+            ->all();
     }
 
     /**

@@ -49,9 +49,6 @@ class Import extends Model
     }
 
     /**
-     * Imports older than the retention window, and the offers staged under
-     * them, are pruned by the scheduled model:prune command.
-     *
      * @return Builder<static>
      */
     public function prunable(): Builder
