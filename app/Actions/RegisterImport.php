@@ -26,7 +26,7 @@ class RegisterImport
     public function __invoke(array $payload): Import
     {
         $supplier = Supplier::where('code', $payload['supplier'])->firstOrFail();
-        $sentAt = Carbon::parse($payload['sent_at']);
+        $sentAt = Carbon::parse($payload['sent_at'])->utc();
 
         $existing = $this->findExisting($supplier, $payload['external_import_id']);
 
